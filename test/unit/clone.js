@@ -6,8 +6,6 @@ var assert = require('assert');
 var sharp = require('../../index');
 var fixtures = require('../fixtures');
 
-sharp.cache(0);
-
 describe('Clone', function() {
   it('Read from Stream and write to multiple Streams', function(done) {
     var finishEventsExpected = 2;
