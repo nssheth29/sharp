@@ -7,6 +7,14 @@ var sharp = require('../../index');
 var fixtures = require('../fixtures');
 
 describe('Clone', function() {
+
+  before(function() {
+    sharp.cache(false);
+  });
+  after(function() {
+    sharp.cache(true);
+  });
+
   it('Read from Stream and write to multiple Streams', function(done) {
     var finishEventsExpected = 2;
     // Output stream 1
@@ -53,4 +61,5 @@ describe('Clone', function() {
     // Go
     fs.createReadStream(fixtures.inputJpg).pipe(rotator);
   });
+
 });

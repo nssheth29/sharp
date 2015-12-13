@@ -8,6 +8,13 @@ var fixtures = require('../fixtures');
 
 describe('Input/output', function() {
 
+  before(function() {
+    sharp.cache(false);
+  });
+  after(function() {
+    sharp.cache(true);
+  });
+
   it('Read from File and write to Stream', function(done) {
     var writable = fs.createWriteStream(fixtures.outputJpg);
     writable.on('finish', function() {
