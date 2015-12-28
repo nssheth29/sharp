@@ -39,6 +39,7 @@
       'src/common.cc',
       'src/metadata.cc',
       'src/operations.cc',
+      'src/iqops.cc',
       'src/pipeline.cc',
       'src/sharp.cc',
       'src/utilities.cc'
