@@ -22,7 +22,6 @@ namespace sharp {
 
   
   void GenerateMask(VipsObject* handle, VipsImage *watermarkImage, VipsImage **out, int w, int h, Options *o);
-  int CompositeImages( VipsObject *context, VipsImage *a, VipsImage *b, VipsImage **out);
 }
 
 

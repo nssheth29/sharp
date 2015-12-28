@@ -62,7 +62,6 @@ using sharp::counterProcess;
 using sharp::counterQueue;
 using sharp::GenerateMask;
 using sharp::Options;
-using sharp::CompositeImages;
 
 enum class Canvas {
   CROP,
@@ -853,8 +852,15 @@ class PipelineWorker : public AsyncWorker {
         VipsImage *mask;
         GenerateMask(hook, watermarkImage, &mask, image->Xsize, image->Ysize, o);
         vips_object_local(hook, mask);
+        // Premultiply overlay
+        VipsImage *overlayImagePremultiplied;
+        if (vips_premultiply(mask, &overlayImagePremultiplied, nullptr)) {
+          (baton->err).append("Failed to premultiply alpha channel of overlay image");
+          return Error();
+        }
+        vips_object_local(hook, overlayImagePremultiplied);
         VipsImage *composite;
-        CompositeImages(hook,mask, image, &composite);
+        Composite(hook, overlayImagePremultiplied, image, &composite);
         vips_object_local(hook, composite);
         image = composite;
       }
