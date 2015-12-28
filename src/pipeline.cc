@@ -4,12 +4,13 @@
 #include <node.h>
 #include <node_buffer.h>
 #include <vips/vips.h>
-
+#include <iostream>
 #include "nan.h"
 
 #include "common.h"
 #include "operations.h"
 #include "pipeline.h"
+#include "iqops.h"
 
 using v8::Handle;
 using v8::Local;
@@ -59,6 +60,9 @@ using sharp::IsDz;
 using sharp::FreeCallback;
 using sharp::counterProcess;
 using sharp::counterQueue;
+using sharp::GenerateMask;
+using sharp::Options;
+using sharp::CompositeImages;
 
 enum class Canvas {
   CROP,
@@ -108,6 +112,10 @@ struct PipelineBaton {
   double sharpenJagged;
   int threshold;
   std::string overlayPath;
+  std::string watermarkPath;
+  char *watermarkBufferIn;
+  size_t watermarkBufferInLength;
+  int watermarkGravity;
   double gamma;
   bool greyscale;
   bool normalize;
@@ -147,6 +155,8 @@ struct PipelineBaton {
     sharpenFlat(1.0),
     sharpenJagged(2.0),
     threshold(0),
+    watermarkBufferInLength(0),
+    watermarkGravity(1),
     gamma(0.0),
     greyscale(false),
     normalize(false),
@@ -176,10 +186,13 @@ struct PipelineBaton {
 class PipelineWorker : public AsyncWorker {
 
  public:
-  PipelineWorker(Callback *callback, PipelineBaton *baton, Callback *queueListener, const Local<Object> &bufferIn) :
+  PipelineWorker(Callback *callback, PipelineBaton *baton, Callback *queueListener, const Local<Object> &bufferIn, const Local<Object> &watermarkBufferIn) :
     AsyncWorker(callback), baton(baton), queueListener(queueListener) {
       if (baton->bufferInLength > 0) {
         SaveToPersistent("bufferIn", bufferIn);
+      }
+      if (baton->watermarkBufferInLength > 0) {
+        SaveToPersistent("watermarkBufferIn", watermarkBufferIn);
       }
     }
   ~PipelineWorker() {}
@@ -770,32 +783,81 @@ class PipelineWorker : public AsyncWorker {
         return Error();
       }
       if (overlayImage->Xsize != image->Xsize && overlayImage->Ysize != image->Ysize) {
-        (baton->err).append("Overlay image must have same dimensions as resized image");
-        return Error();
+          (baton->err).append("Overlay image must have same dimensions as resized image");
+          return Error();
       }
 
       // Ensure overlay is sRGB
       VipsImage *overlayImageRGB;
       if (vips_colourspace(overlayImage, &overlayImageRGB, VIPS_INTERPRETATION_sRGB, nullptr)) {
-        return Error();
+          return Error();
       }
       vips_object_local(hook, overlayImageRGB);
 
       // Premultiply overlay
       VipsImage *overlayImagePremultiplied;
       if (vips_premultiply(overlayImageRGB, &overlayImagePremultiplied, nullptr)) {
-        (baton->err).append("Failed to premultiply alpha channel of overlay image");
-        return Error();
+          (baton->err).append("Failed to premultiply alpha channel of overlay image");
+          return Error();
       }
       vips_object_local(hook, overlayImagePremultiplied);
 
       VipsImage *composited;
       if (Composite(hook, overlayImagePremultiplied, image, &composited)) {
-        (baton->err).append("Failed to composite images");
-        return Error();
+          (baton->err).append("Failed to composite images");
+          return Error();
       }
       vips_object_local(hook, composited);
       image = composited;
+    }
+    
+    if (baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty()) {
+      VipsImage *watermarkImage = nullptr;
+      ImageType watermarkImageType  = ImageType::UNKNOWN;
+      if (baton->watermarkBufferInLength > 0) {
+        watermarkImageType = DetermineImageType(baton->watermarkBufferIn, baton->watermarkBufferInLength);
+        if (watermarkImageType != ImageType::UNKNOWN) {
+          watermarkImage = InitImage(baton->watermarkBufferIn, baton->watermarkBufferInLength, baton->accessMethod);
+          if (watermarkImage == nullptr) {
+            // Could not read header data
+            (baton->err).append("Watermark buffer has corrupt header");
+            return Error();
+          }
+        }
+        else {
+          (baton->err).append("Watermark image must be of image format");
+          return Error();
+        }
+      }
+      else {
+        watermarkImageType = DetermineImageType(baton->watermarkPath.data());
+        std::cout << baton->watermarkPath.data();
+        if (watermarkImageType != ImageType::UNKNOWN) {
+          watermarkImage = InitImage(baton->watermarkPath.data(), baton->accessMethod);
+          if (watermarkImage == nullptr) {
+            // Could not read header data
+            (baton->err).append("Watermark buffer has corrupt header");
+            return Error();
+          }
+        }
+        else {
+          (baton->err).append("Watermark image must be of image format");
+          (baton->err).append(baton->watermarkPath.data());
+          return Error();
+        }
+      }
+      vips_object_local(hook, watermarkImage);
+      if (watermarkImage != nullptr) {
+        Options *o = new Options;
+        o->position = baton->watermarkGravity;
+        VipsImage *mask;
+        GenerateMask(hook, watermarkImage, &mask, image->Xsize, image->Ysize, o);
+        vips_object_local(hook, mask);
+        VipsImage *composite;
+        CompositeImages(hook,mask, image, &composite);
+        vips_object_local(hook, composite);
+        image = composite;
+      }
     }
 
     // Reverse premultiplication after all transformations:
@@ -1255,6 +1317,15 @@ NAN_METHOD(pipeline) {
   for (int i = 0; i < 4; i++) {
     baton->background[i] = To<int32_t>(Get(background, i).ToLocalChecked()).FromJust();
   }
+  //Watermark Options
+  baton->watermarkPath = *Utf8String(Get(options, New("watermarkPath").ToLocalChecked()).ToLocalChecked());
+  baton->watermarkGravity = To<int32_t>(Get(options, New("watermarkGravity").ToLocalChecked()).ToLocalChecked()).FromJust();
+  Local<Object> watermarkBufferIn;
+  if (node::Buffer::HasInstance(Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked())) {
+    bufferIn = Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
+    baton->watermarkBufferInLength = node::Buffer::Length(watermarkBufferIn);
+    baton->watermarkBufferIn = node::Buffer::Data(watermarkBufferIn);
+  }
   // Overlay options
   baton->overlayPath = *Utf8String(Get(options, New("overlayPath").ToLocalChecked()).ToLocalChecked());
   // Resize options
@@ -1296,7 +1367,7 @@ NAN_METHOD(pipeline) {
 
   // Join queue for worker thread
   Callback *callback = new Callback(info[1].As<Function>());
-  AsyncQueueWorker(new PipelineWorker(callback, baton, queueListener, bufferIn));
+  AsyncQueueWorker(new PipelineWorker(callback, baton, queueListener, bufferIn, watermarkBufferIn));
 
   // Increment queued task counter
   g_atomic_int_inc(&counterQueue);
