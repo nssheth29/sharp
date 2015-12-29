@@ -275,7 +275,7 @@ Sharp.prototype.overlayWith = function(overlayPath) {
 };
 
 
-Sharp.prototype.watermarkWith = function(watermark, watermarkGravity) {
+Sharp.prototype.watermarkWithImage = function(watermark, watermarkGravity) {
     if (typeof watermark === 'string') {
       this.options.watermarkPath = watermark;
     }
@@ -288,6 +288,18 @@ Sharp.prototype.watermarkWith = function(watermark, watermarkGravity) {
     this.options.watermarkGravity = watermarkGravity;
     return this;
 }
+
+Sharp.prototype.watermarkWithText = function(watermark, watermarkGravity) {
+    if (typeof watermark === 'string') {
+      this.options.watermarkText = watermark;
+    }
+    else {
+      throw new Error('The watermark must be of string type');
+    }
+    this.options.watermarkGravity = watermarkGravity;
+    return this;
+}
+
 /*
   Rotate output image by 0, 90, 180 or 270 degrees
   Auto-rotation based on the EXIF Orientation tag is represented by an angle of -1

@@ -62,6 +62,7 @@ using sharp::counterProcess;
 using sharp::counterQueue;
 using sharp::GenerateMask;
 using sharp::Options;
+using sharp::GenerateTextImage;
 
 enum class Canvas {
   CROP,
@@ -112,6 +113,7 @@ struct PipelineBaton {
   int threshold;
   std::string overlayPath;
   std::string watermarkPath;
+  std::string watermarkText;
   char *watermarkBufferIn;
   size_t watermarkBufferInLength;
   int watermarkGravity;
@@ -542,7 +544,8 @@ class PipelineWorker : public AsyncWorker {
     bool shouldSharpen = baton->sharpenRadius != 0;
     bool shouldThreshold = baton->threshold != 0;
     bool hasOverlay = !baton->overlayPath.empty();
-    bool shouldPremultiplyAlpha = HasAlpha(image) && (shouldAffineTransform || shouldBlur || shouldSharpen || hasOverlay);
+    bool hasWatermark = baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty() || !baton->watermarkText.empty();
+    bool shouldPremultiplyAlpha = HasAlpha(image) && (shouldAffineTransform || shouldBlur || shouldSharpen || hasOverlay || hasWatermark);
 
     // Premultiply image alpha channel before all transformations to avoid
     // dark fringing around bright pixels
@@ -810,7 +813,7 @@ class PipelineWorker : public AsyncWorker {
       image = composited;
     }
     
-    if (baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty()) {
+    if (hasWatermark) {
       VipsImage *watermarkImage = nullptr;
       ImageType watermarkImageType  = ImageType::UNKNOWN;
       if (baton->watermarkBufferInLength > 0) {
@@ -828,9 +831,8 @@ class PipelineWorker : public AsyncWorker {
           return Error();
         }
       }
-      else {
+      else if (!baton->watermarkPath.empty()) {
         watermarkImageType = DetermineImageType(baton->watermarkPath.data());
-        std::cout << baton->watermarkPath.data();
         if (watermarkImageType != ImageType::UNKNOWN) {
           watermarkImage = InitImage(baton->watermarkPath.data(), baton->accessMethod);
           if (watermarkImage == nullptr) {
@@ -845,12 +847,17 @@ class PipelineWorker : public AsyncWorker {
           return Error();
         }
       }
-      vips_object_local(hook, watermarkImage);
+      else {
+        GenerateTextImage(hook, baton->watermarkText.data(), &watermarkImage);
+        vips_image_write_to_file(watermarkImage, "/Users/nssheth/Downloads/t.png", nullptr);
+      }
       if (watermarkImage != nullptr) {
+        vips_object_local(hook, watermarkImage);
         Options *o = new Options;
         o->position = baton->watermarkGravity;
         VipsImage *mask;
         GenerateMask(hook, watermarkImage, &mask, image->Xsize, image->Ysize, o);
+         vips_image_write_to_file(mask, "/Users/nssheth/Downloads/m.png", nullptr);
         vips_object_local(hook, mask);
         // Premultiply overlay
         VipsImage *overlayImagePremultiplied;
@@ -1325,6 +1332,7 @@ NAN_METHOD(pipeline) {
   }
   //Watermark Options
   baton->watermarkPath = *Utf8String(Get(options, New("watermarkPath").ToLocalChecked()).ToLocalChecked());
+  baton->watermarkText = *Utf8String(Get(options, New("watermarkText").ToLocalChecked()).ToLocalChecked());
   baton->watermarkGravity = To<int32_t>(Get(options, New("watermarkGravity").ToLocalChecked()).ToLocalChecked()).FromJust();
   Local<Object> watermarkBufferIn;
   if (node::Buffer::HasInstance(Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked())) {

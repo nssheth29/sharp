@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "common.h"
+#include "operations.h"
 #include "iqops.h"
 
 namespace sharp {
@@ -70,28 +71,28 @@ namespace sharp {
 
 
   void GenerateMask(VipsObject* handle, VipsImage *watermarkImage, VipsImage **out, int w, int h, Options *o) {
-      VipsImage *workingImage = NULL;
+      VipsImage *workingImage = nullptr;
       VipsImage *alphaImage = watermarkImage;
     
-      if (!HasAlpha(watermarkImage))
+      if (!HasAlpha(watermarkImage)) {
         AddAlphaBand(handle, watermarkImage, &alphaImage);
-    
-      vips_object_local(handle, alphaImage);
+        vips_object_local(handle, alphaImage);
+      }
     
       if (o->position == 1) { //north
-          vips_embed(alphaImage, &workingImage, 0, 0, w, h, NULL);
+          vips_embed(alphaImage, &workingImage, 0, 0, w, h, nullptr);
       }
       else if (o->position == 2) {
-          vips_embed(alphaImage, &workingImage, w / 2 - watermarkImage->Xsize / 2, 0, w, h, NULL);
+          vips_embed(alphaImage, &workingImage, w / 2 - watermarkImage->Xsize / 2, 0, w, h, nullptr);
       }
       else if (o->position == 3) {
-          vips_embed(alphaImage, &workingImage, w - watermarkImage->Xsize, 0, w, h, NULL);
+          vips_embed(alphaImage, &workingImage, w - watermarkImage->Xsize, 0, w, h, nullptr);
       }
       else if (o->position == 4) {
-          vips_embed(alphaImage, &workingImage, 0, h / 2 - watermarkImage->Ysize / 2, w, h, NULL);
+          vips_embed(alphaImage, &workingImage, 0, h / 2 - watermarkImage->Ysize / 2, w, h, nullptr);
       }
       else if (o->position == 5) {
-          vips_embed(alphaImage, &workingImage, w / 2 - watermarkImage->Xsize / 2, h / 2 - watermarkImage->Ysize / 2, w, h, NULL);
+          vips_embed(alphaImage, &workingImage, w / 2 - watermarkImage->Xsize / 2, h / 2 - watermarkImage->Ysize / 2, w, h, nullptr);
       }
       else if (o->position == 6) {
           vips_embed(alphaImage, &workingImage, w - watermarkImage->Xsize, h / 2 - watermarkImage->Ysize / 2, w, h, NULL);
@@ -119,4 +120,24 @@ namespace sharp {
       vips_object_local(handle, workingImage);
       *out = workingImage;
   }
+  
+  void GenerateTextImage(VipsObject* handle, const char* text, VipsImage **out) {
+    double c[4] = {1, 1, 1, 1};
+    double front[4] = {0, 0, 0, 0};
+    VipsImage **t = (VipsImage **) vips_object_local_array(handle, 10);
+    vips_text( &t[0], text, "width", 500, "dpi", 300, NULL );
+    vips_linear1( t[0], &t[1], 1.0, 0.0, NULL );
+    vips_cast( t[1], &t[2], VIPS_FORMAT_UCHAR, NULL);
+    vips_linear(t[2], &t[3], c,front, 4, NULL);
+    vips_embed(t[3], &t[4], 50, 50, t[3]->Xsize + 102, t[3]->Ysize + 102, NULL);
+
+    vips_linear1( t[0], &t[5], 0.2, 0.0, NULL );
+    vips_cast( t[5], &t[6], VIPS_FORMAT_UCHAR, NULL);
+    vips_linear(t[6], &t[7], c,front, 4, NULL);
+    vips_embed(t[7], &t[8], 52, 52, t[7]->Xsize + 102, t[7]->Ysize + 102, NULL);
+    
+    sharp::Composite(handle, t[4], t[8], &t[9]);
+    *out = t[9];
+  }
+
 }
