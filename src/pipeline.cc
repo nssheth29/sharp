@@ -812,7 +812,7 @@ class PipelineWorker : public AsyncWorker {
       vips_object_local(hook, composited);
       image = composited;
     }
-    
+
     if (hasWatermark) {
       VipsImage *watermarkImage = nullptr;
       ImageType watermarkImageType  = ImageType::UNKNOWN;
@@ -849,7 +849,6 @@ class PipelineWorker : public AsyncWorker {
       }
       else {
         GenerateTextImage(hook, baton->watermarkText.data(), &watermarkImage);
-        vips_image_write_to_file(watermarkImage, "/Users/nssheth/Downloads/t.png", nullptr);
       }
       if (watermarkImage != nullptr) {
         vips_object_local(hook, watermarkImage);
@@ -857,7 +856,6 @@ class PipelineWorker : public AsyncWorker {
         o->position = baton->watermarkGravity;
         VipsImage *mask;
         GenerateMask(hook, watermarkImage, &mask, image->Xsize, image->Ysize, o);
-         vips_image_write_to_file(mask, "/Users/nssheth/Downloads/m.png", nullptr);
         vips_object_local(hook, mask);
         // Premultiply overlay
         VipsImage *overlayImagePremultiplied;
