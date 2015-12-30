@@ -6,8 +6,8 @@
 //
 //
 
-#ifndef iqops_hpp
-#define iqops_hpp
+#ifndef iqops_h
+#define iqops_h
 
 #include <stdio.h>
 #include <vips/vips.h>
@@ -22,7 +22,6 @@ namespace sharp {
 
   
   void GenerateMask(VipsObject* handle, VipsImage *watermarkImage, VipsImage **out, int w, int h, Options *o);
-  void GenerateTextImage(VipsObject *handle, const char* text, VipsImage **out);
 }
 
 

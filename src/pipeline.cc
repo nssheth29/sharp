@@ -62,7 +62,6 @@ using sharp::counterProcess;
 using sharp::counterQueue;
 using sharp::GenerateMask;
 using sharp::Options;
-using sharp::GenerateTextImage;
 
 enum class Canvas {
   CROP,
@@ -113,7 +112,6 @@ struct PipelineBaton {
   int threshold;
   std::string overlayPath;
   std::string watermarkPath;
-  std::string watermarkText;
   char *watermarkBufferIn;
   size_t watermarkBufferInLength;
   int watermarkGravity;
@@ -544,7 +542,7 @@ class PipelineWorker : public AsyncWorker {
     bool shouldSharpen = baton->sharpenRadius != 0;
     bool shouldThreshold = baton->threshold != 0;
     bool hasOverlay = !baton->overlayPath.empty();
-    bool hasWatermark = baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty() || !baton->watermarkText.empty();
+    bool hasWatermark = baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty();
     bool shouldPremultiplyAlpha = HasAlpha(image) && (shouldAffineTransform || shouldBlur || shouldSharpen || hasOverlay || hasWatermark);
 
     // Premultiply image alpha channel before all transformations to avoid
@@ -812,7 +810,7 @@ class PipelineWorker : public AsyncWorker {
       vips_object_local(hook, composited);
       image = composited;
     }
-
+    
     if (hasWatermark) {
       VipsImage *watermarkImage = nullptr;
       ImageType watermarkImageType  = ImageType::UNKNOWN;
@@ -846,9 +844,6 @@ class PipelineWorker : public AsyncWorker {
           (baton->err).append(baton->watermarkPath.data());
           return Error();
         }
-      }
-      else {
-        GenerateTextImage(hook, baton->watermarkText.data(), &watermarkImage);
       }
       if (watermarkImage != nullptr) {
         vips_object_local(hook, watermarkImage);
@@ -1330,11 +1325,10 @@ NAN_METHOD(pipeline) {
   }
   //Watermark Options
   baton->watermarkPath = *Utf8String(Get(options, New("watermarkPath").ToLocalChecked()).ToLocalChecked());
-  baton->watermarkText = *Utf8String(Get(options, New("watermarkText").ToLocalChecked()).ToLocalChecked());
   baton->watermarkGravity = To<int32_t>(Get(options, New("watermarkGravity").ToLocalChecked()).ToLocalChecked()).FromJust();
   Local<Object> watermarkBufferIn;
   if (node::Buffer::HasInstance(Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked())) {
-    bufferIn = Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
+    watermarkBufferIn = Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
     baton->watermarkBufferInLength = node::Buffer::Length(watermarkBufferIn);
     baton->watermarkBufferIn = node::Buffer::Data(watermarkBufferIn);
   }

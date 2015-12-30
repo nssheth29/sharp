@@ -85,7 +85,6 @@ var Sharp = function(input) {
     watermarkPath: '',
     watermarkBufferIn: null,
     watermarkGravity: 1,
-    watermarkText: '',
     // output options
     output: '__input',
     progressive: false,
@@ -275,7 +274,7 @@ Sharp.prototype.overlayWith = function(overlayPath) {
 };
 
 
-Sharp.prototype.watermarkWithImage = function(watermark, watermarkGravity) {
+Sharp.prototype.watermarkWith = function(watermark, watermarkGravity) {
     if (typeof watermark === 'string') {
       this.options.watermarkPath = watermark;
     }
@@ -284,17 +283,6 @@ Sharp.prototype.watermarkWithImage = function(watermark, watermarkGravity) {
     }
     else {
       throw new Error('The watermark must be a path to a file or a buffer');
-    }
-    this.options.watermarkGravity = watermarkGravity;
-    return this;
-}
-
-Sharp.prototype.watermarkWithText = function(watermark, watermarkGravity) {
-    if (typeof watermark === 'string') {
-      this.options.watermarkText = watermark;
-    }
-    else {
-      throw new Error('The watermark must be of string type');
     }
     this.options.watermarkGravity = watermarkGravity;
     return this;

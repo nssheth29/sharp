@@ -120,24 +120,4 @@ namespace sharp {
       vips_object_local(handle, workingImage);
       *out = workingImage;
   }
-  
-  void GenerateTextImage(VipsObject* handle, const char* text, VipsImage **out) {
-    double c[4] = {1, 1, 1, 1};
-    double front[4] = {0, 0, 0, 0};
-    VipsImage **t = (VipsImage **) vips_object_local_array(handle, 10);
-    vips_text( &t[0], text, "width", 500, "dpi", 300, NULL );
-    vips_linear1( t[0], &t[1], 1.0, 0.0, NULL );
-    vips_cast( t[1], &t[2], VIPS_FORMAT_UCHAR, NULL);
-    vips_linear(t[2], &t[3], c,front, 4, NULL);
-    vips_embed(t[3], &t[4], 50, 50, t[3]->Xsize + 102, t[3]->Ysize + 102, NULL);
-
-    vips_linear1( t[0], &t[5], 0.2, 0.0, NULL );
-    vips_cast( t[5], &t[6], VIPS_FORMAT_UCHAR, NULL);
-    vips_linear(t[6], &t[7], c,front, 4, NULL);
-    vips_embed(t[7], &t[8], 52, 52, t[7]->Xsize + 102, t[7]->Ysize + 102, NULL);
-    
-    sharp::Composite(handle, t[4], t[8], &t[9]);
-    *out = t[9];
-  }
-
 }
