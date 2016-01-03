@@ -262,15 +262,17 @@ Sharp.prototype.negate = function(negate) {
   return this;
 };
 
-Sharp.prototype.overlayWith = function(overlayPath) {
-  if (typeof overlayPath !== 'string') {
-    throw new Error('The overlay path must be a string');
+Sharp.prototype.overlayWith = function(overlay) {
+  if (typeof overlay === 'string') {
+    this.options.overlayPath = overlay;
   }
-  if (overlayPath === '') {
-    throw new Error('The overlay path cannot be empty');
+  else if (typeof overlay === 'object' && overlay instanceof Buffer) {
+    this.options.overlayBufferIn = overlay;
   }
-  this.options.overlayPath = overlayPath;
-  return this;
+  else {
+    throw new Error("The overlay must be a path to a file or a buffer");
+  }
+    return this;
 };
 
 

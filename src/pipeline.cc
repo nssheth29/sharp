@@ -5,6 +5,7 @@
 #include <node_buffer.h>
 #include <vips/vips.h>
 #include <iostream>
+#include <vector>
 #include "nan.h"
 
 #include "common.h"
@@ -111,6 +112,8 @@ struct PipelineBaton {
   double sharpenJagged;
   int threshold;
   std::string overlayPath;
+  char *overlayBufferIn;
+  size_t overlayBufferInLength;
   std::string watermarkPath;
   char *watermarkBufferIn;
   size_t watermarkBufferInLength;
@@ -154,6 +157,7 @@ struct PipelineBaton {
     sharpenFlat(1.0),
     sharpenJagged(2.0),
     threshold(0),
+    overlayBufferInLength(0),
     watermarkBufferInLength(0),
     watermarkGravity(1),
     gamma(0.0),
@@ -182,17 +186,31 @@ struct PipelineBaton {
     }
 };
 
+struct PersistentBuffer {
+  std::string name;
+  Local<Object> &buffer;
+  PersistentBuffer(std::string n, Local<Object> &b):
+    name(n),
+    buffer(b) {
+    
+    }
+};
+
 class PipelineWorker : public AsyncWorker {
 
  public:
-  PipelineWorker(Callback *callback, PipelineBaton *baton, Callback *queueListener, const Local<Object> &bufferIn, const Local<Object> &watermarkBufferIn) :
+  PipelineWorker(Callback *callback, PipelineBaton *baton, Callback *queueListener, std::vector<PersistentBuffer *> buffers) :
     AsyncWorker(callback), baton(baton), queueListener(queueListener) {
-      if (baton->bufferInLength > 0) {
-        SaveToPersistent("bufferIn", bufferIn);
+      for (unsigned long i = 0;  i < buffers.size(); i++ ) {
+        SaveToPersistent(buffers[i]->name.data(), buffers[i]->buffer);
+        
       }
-      if (baton->watermarkBufferInLength > 0) {
-        SaveToPersistent("watermarkBufferIn", watermarkBufferIn);
-      }
+//      if (baton->bufferInLength > 0) {
+//        SaveToPersistent("bufferIn", bufferIn);
+//      }
+//      if (baton->watermarkBufferInLength > 0) {
+//        SaveToPersistent("watermarkBufferIn", watermarkBufferIn);
+//      }
     }
   ~PipelineWorker() {}
 
@@ -541,7 +559,7 @@ class PipelineWorker : public AsyncWorker {
     bool shouldBlur = baton->blurSigma != 0.0;
     bool shouldSharpen = baton->sharpenRadius != 0;
     bool shouldThreshold = baton->threshold != 0;
-    bool hasOverlay = !baton->overlayPath.empty();
+    bool hasOverlay = !baton->overlayPath.empty() || baton->overlayBufferInLength > 0;
     bool hasWatermark = baton->watermarkBufferInLength > 0 || !baton->watermarkPath.empty();
     bool shouldPremultiplyAlpha = HasAlpha(image) && (shouldAffineTransform || shouldBlur || shouldSharpen || hasOverlay || hasWatermark);
 
@@ -755,60 +773,79 @@ class PipelineWorker : public AsyncWorker {
     if (hasOverlay) {
       VipsImage *overlayImage = nullptr;
       ImageType overlayImageType = ImageType::UNKNOWN;
-      overlayImageType = DetermineImageType(baton->overlayPath.data());
-      if (overlayImageType != ImageType::UNKNOWN) {
-        overlayImage = InitImage(baton->overlayPath.data(), baton->accessMethod);
-        if (overlayImage == nullptr) {
-          (baton->err).append("Overlay image has corrupt header");
-          return Error();
+      if (!baton->overlayPath.empty()) {
+        overlayImageType = DetermineImageType(baton->overlayPath.data());
+        if (overlayImageType != ImageType::UNKNOWN) {
+          overlayImage = InitImage(baton->overlayPath.data(), baton->accessMethod);
+          if (overlayImage == nullptr) {
+            (baton->err).append("Overlay image has corrupt header");
+            return Error();
+          } else {
+            vips_object_local(hook, overlayImage);
+          }
         } else {
-          vips_object_local(hook, overlayImage);
+          (baton->err).append("Overlay image is of an unsupported image format");
+          return Error();
         }
-      } else {
-        (baton->err).append("Overlay image is of an unsupported image format");
-        return Error();
       }
-      if (image->BandFmt != VIPS_FORMAT_UCHAR && image->BandFmt != VIPS_FORMAT_FLOAT) {
-        (baton->err).append("Expected image band format to be uchar or float: ");
-        (baton->err).append(vips_enum_nick(VIPS_TYPE_BAND_FORMAT, image->BandFmt));
-        return Error();
-      }
-      if (overlayImage->BandFmt != VIPS_FORMAT_UCHAR && overlayImage->BandFmt != VIPS_FORMAT_FLOAT) {
-        (baton->err).append("Expected overlay image band format to be uchar or float: ");
-        (baton->err).append(vips_enum_nick(VIPS_TYPE_BAND_FORMAT, overlayImage->BandFmt));
-        return Error();
-      }
-      if (!HasAlpha(overlayImage)) {
-        (baton->err).append("Overlay image must have an alpha channel");
-        return Error();
-      }
-      if (overlayImage->Xsize != image->Xsize && overlayImage->Ysize != image->Ysize) {
-          (baton->err).append("Overlay image must have same dimensions as resized image");
+      else {
+        overlayImageType = DetermineImageType(baton->overlayBufferIn, baton->overlayBufferInLength);
+        if (overlayImageType != ImageType::UNKNOWN) {
+          overlayImage = InitImage(baton->overlayBufferIn, baton->overlayBufferInLength, baton->accessMethod);
+          if (overlayImage == nullptr) {
+            (baton->err).append("Overlay image has corrupt header");
+            return Error();
+          } else {
+            vips_object_local(hook, overlayImage);
+          }
+        } else {
+          (baton->err).append("Overlay image is of an unsupported image format");
           return Error();
+        }
       }
+      if (overlayImage != nullptr) {
+        if (image->BandFmt != VIPS_FORMAT_UCHAR && image->BandFmt != VIPS_FORMAT_FLOAT) {
+          (baton->err).append("Expected image band format to be uchar or float: ");
+          (baton->err).append(vips_enum_nick(VIPS_TYPE_BAND_FORMAT, image->BandFmt));
+          return Error();
+        }
+        if (overlayImage->BandFmt != VIPS_FORMAT_UCHAR && overlayImage->BandFmt != VIPS_FORMAT_FLOAT) {
+          (baton->err).append("Expected overlay image band format to be uchar or float: ");
+          (baton->err).append(vips_enum_nick(VIPS_TYPE_BAND_FORMAT, overlayImage->BandFmt));
+          return Error();
+        }
+        if (!HasAlpha(overlayImage)) {
+          (baton->err).append("Overlay image must have an alpha channel");
+          return Error();
+        }
+        if (overlayImage->Xsize != image->Xsize && overlayImage->Ysize != image->Ysize) {
+            (baton->err).append("Overlay image must have same dimensions as resized image");
+            return Error();
+        }
 
-      // Ensure overlay is sRGB
-      VipsImage *overlayImageRGB;
-      if (vips_colourspace(overlayImage, &overlayImageRGB, VIPS_INTERPRETATION_sRGB, nullptr)) {
-          return Error();
-      }
-      vips_object_local(hook, overlayImageRGB);
+        // Ensure overlay is sRGB
+        VipsImage *overlayImageRGB;
+        if (vips_colourspace(overlayImage, &overlayImageRGB, VIPS_INTERPRETATION_sRGB, nullptr)) {
+            return Error();
+        }
+        vips_object_local(hook, overlayImageRGB);
 
-      // Premultiply overlay
-      VipsImage *overlayImagePremultiplied;
-      if (vips_premultiply(overlayImageRGB, &overlayImagePremultiplied, nullptr)) {
-          (baton->err).append("Failed to premultiply alpha channel of overlay image");
-          return Error();
-      }
-      vips_object_local(hook, overlayImagePremultiplied);
+        // Premultiply overlay
+        VipsImage *overlayImagePremultiplied;
+        if (vips_premultiply(overlayImageRGB, &overlayImagePremultiplied, nullptr)) {
+            (baton->err).append("Failed to premultiply alpha channel of overlay image");
+            return Error();
+        }
+        vips_object_local(hook, overlayImagePremultiplied);
 
-      VipsImage *composited;
-      if (Composite(hook, overlayImagePremultiplied, image, &composited)) {
-          (baton->err).append("Failed to composite images");
-          return Error();
+        VipsImage *composited;
+        if (Composite(hook, overlayImagePremultiplied, image, &composited)) {
+            (baton->err).append("Failed to composite images");
+            return Error();
+        }
+        vips_object_local(hook, composited);
+        image = composited;
       }
-      vips_object_local(hook, composited);
-      image = composited;
     }
     
     if (hasWatermark) {
@@ -1276,7 +1313,8 @@ NAN_METHOD(pipeline) {
   // V8 objects are converted to non-V8 types held in the baton struct
   PipelineBaton *baton = new PipelineBaton;
   Local<Object> options = info[0].As<Object>();
-
+  std::vector<PersistentBuffer *> buffers;
+  
   // Input filename
   baton->fileIn = *Utf8String(Get(options, New("fileIn").ToLocalChecked()).ToLocalChecked());
   baton->accessMethod =
@@ -1288,6 +1326,8 @@ NAN_METHOD(pipeline) {
     bufferIn = Get(options, New("bufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
     baton->bufferInLength = node::Buffer::Length(bufferIn);
     baton->bufferIn = node::Buffer::Data(bufferIn);
+    PersistentBuffer *b = new PersistentBuffer("bufferIn", bufferIn);
+    buffers.push_back(b);
   }
   // ICC profile to use when input CMYK image has no embedded profile
   baton->iccProfilePath = *Utf8String(Get(options, New("iccProfilePath").ToLocalChecked()).ToLocalChecked());
@@ -1331,9 +1371,19 @@ NAN_METHOD(pipeline) {
     watermarkBufferIn = Get(options, New("watermarkBufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
     baton->watermarkBufferInLength = node::Buffer::Length(watermarkBufferIn);
     baton->watermarkBufferIn = node::Buffer::Data(watermarkBufferIn);
+    PersistentBuffer *b = new PersistentBuffer("watermarkBufferIn", watermarkBufferIn);
+    buffers.push_back(b);
   }
   // Overlay options
   baton->overlayPath = *Utf8String(Get(options, New("overlayPath").ToLocalChecked()).ToLocalChecked());
+  Local<Object> overlayBufferIn;
+  if (node::Buffer::HasInstance(Get(options, New("overlayBufferIn").ToLocalChecked()).ToLocalChecked())) {
+    overlayBufferIn = Get(options, New("overlayBufferIn").ToLocalChecked()).ToLocalChecked().As<Object>();
+    baton->overlayBufferInLength = node::Buffer::Length(overlayBufferIn);
+    baton->overlayBufferIn = node::Buffer::Data(overlayBufferIn);
+    PersistentBuffer *b = new PersistentBuffer("overlayBufferIn", overlayBufferIn);
+    buffers.push_back(b);
+  }
   // Resize options
   baton->withoutEnlargement = To<bool>(Get(options, New("withoutEnlargement").ToLocalChecked()).ToLocalChecked()).FromJust();
   baton->gravity = To<int32_t>(Get(options, New("gravity").ToLocalChecked()).ToLocalChecked()).FromJust();
@@ -1373,7 +1423,7 @@ NAN_METHOD(pipeline) {
 
   // Join queue for worker thread
   Callback *callback = new Callback(info[1].As<Function>());
-  AsyncQueueWorker(new PipelineWorker(callback, baton, queueListener, bufferIn, watermarkBufferIn));
+  AsyncQueueWorker(new PipelineWorker(callback, baton, queueListener, buffers));
 
   // Increment queued task counter
   g_atomic_int_inc(&counterQueue);
